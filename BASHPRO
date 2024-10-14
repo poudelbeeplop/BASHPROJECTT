@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# Function to display usage/help information
+function display_usage() {
+    echo "Usage: ./$(basename "$0") -c <cpu_threshold> -m <mem_threshold> -d <disk_threshold> -e <email>"
+    echo "Options:"
+    echo "  -c <cpu_threshold>: Set the CPU usage threshold (in percentage)."
+    echo "  -m <mem_threshold>: Set the memory usage threshold (in percentage)."
+    echo "  -d <disk_threshold>: Set the disk space threshold (in percentage)."
+    echo "  -e <email>: Set the email address for notifications."
+    echo "  -h: Display this help information."
+}
+
+# Check if no arguments are provided
+if [[ $# -eq 0 || "$1" == "-h" ]]; then
+    display_usage
+    exit 0
+fi
+
+# Initialize variables
+cpu_threshold=""
+mem_threshold=""
+disk_threshold=""
+email=""
+
+# Process command-line options and arguments
+while getopts ":c:m:d:e:h" opt; do
+    case $opt in
+        c) cpu_threshold=$OPTARG ;;
+        m) mem_threshold=$OPTARG ;;
+        d) disk_threshold=$OPTARG ;;
+        e) email=$OPTARG ;;
+        h) display_usage; exit 0 ;;
+        \?) echo "Invalid option: -$OPTARG"; display_usage; exit 1 ;;
+        :) echo "Option -$OPTARG requires an argument."; display_usage; exit 1 ;;
+    esac
+done
+
+# Validate input thresholds
+if [[ -z $cpu_threshold || -z $mem_threshold || -z $disk_threshold || -z $email ]]; then
+    echo "Error: Missing required options."
+    display_usage
+    exit 1
+fi
+
+# Function to check CPU usage
+check_cpu() {
+    local usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')
+    echo "CPU Usage: $usage%"
+    if (( $(echo "$usage > $cpu_threshold" | bc -l) )); then
+        alert "CPU usage is above threshold: $usage%"
+    fi
+}
+
+# Function to check memory usage
+check_memory() {
+    local usage=$(free | grep Mem | awk '{print $3/$2 * 100.0}')
+    echo "Memory Usage: $usage%"
+    if (( $(echo "$usage > $mem_threshold" | bc -l) )); then
+        alert "Memory usage is above threshold: $usage%"
+    fi
+}
+
+# Function to check disk space
+check_disk() {
+    local usage=$(df / | grep / | awk '{ print $5 }' | sed 's/%//g')
+    echo "Disk Usage: $usage%"
+    if (( usage > disk_threshold )); then
+        alert "Disk usage is above threshold: $usage%"
+    fi
+}
+
+# Function to check network connectivity
+check_network() {
+    local response=$(ping -c 1 google.com > /dev/null 2>&1; echo $?)
+    if [ $response -ne 0 ]; then
+        alert "Network connectivity issue detected."
+    else
+        echo "Network is reachable."
+    fi
+}
+
+# Function to send an alert
+alert() {
+    local message="$1"
+    echo "$message" | mail -s "System Health Alert" "$email"
+    echo "Alert sent: $message"
+}
+
+# Log results to a file
+log_results() {
+    {
+        echo "===== System Health Check ====="
+        check_cpu
+        check_memory
+        check_disk
+        check_network
+        echo "==============================="
+    } >> system_health.log
+}
+
+# Perform health checks and log results
+log_results
+echo "Health check completed. Results logged to system_health.log."
